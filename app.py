@@ -23,6 +23,14 @@ def calculate_returns(df):
     """Calculate returns for different time periods"""
     # Convert timestamp to datetime and set as index
     df['timestamp'] = pd.to_datetime(df['timestamp'])
+    
+    # Filter for trading hours (9:30 AM to 4:00 PM)
+    df['time'] = df['timestamp'].dt.time
+    df = df[
+        (df['time'] >= pd.to_datetime('09:30').time()) &
+        (df['time'] <= pd.to_datetime('16:00').time())
+    ]
+    
     df.set_index('timestamp', inplace=True)
     
     # Create daily groups
@@ -40,27 +48,29 @@ def calculate_returns(df):
     for date, group in daily_groups:
         group = group.sort_index()
         
-        # Night return (previous close to today's open)
-        if prev_close is not None:  # Skip first day as we don't have previous close
-            night_return = (group['o'].iloc[0] / prev_close) - 1
-            night_returns.append(night_return)
-            am_returns.append(am_return)
-            mid_returns.append(mid_return)
-            pm_returns.append(pm_return)
-            dates.append(date)
-        
-        # AM return (open to 10:30)
-        morning_price = group.between_time('10:30', '10:30')['c'].iloc[0] if len(group.between_time('10:30', '10:30')) > 0 else group['o'].iloc[0]
-        am_return = (morning_price / group['o'].iloc[0]) - 1
-        
-        # Mid return (10:30 to 15:00)
-        mid_day_price = group.between_time('15:00', '15:00')['c'].iloc[0] if len(group.between_time('15:00', '15:00')) > 0 else morning_price
-        mid_return = (mid_day_price / morning_price) - 1
-        
-        # PM return (15:00 to close)
-        pm_return = (group['c'].iloc[-1] / mid_day_price) - 1
-        
-        prev_close = group['c'].iloc[-1]
+        # Only process if we have data for the full trading day
+        if len(group) > 0:
+            # Night return (previous close to today's open)
+            if prev_close is not None:
+                night_return = (group['o'].iloc[0] / prev_close) - 1
+                night_returns.append(night_return)
+                am_returns.append(am_return)
+                mid_returns.append(mid_return)
+                pm_returns.append(pm_return)
+                dates.append(date)
+            
+            # AM return (open to 10:30)
+            morning_price = group.between_time('10:30', '10:30')['c'].iloc[0] if len(group.between_time('10:30', '10:30')) > 0 else group['o'].iloc[0]
+            am_return = (morning_price / group['o'].iloc[0]) - 1
+            
+            # Mid return (10:30 to 15:00)
+            mid_day_price = group.between_time('15:00', '15:00')['c'].iloc[0] if len(group.between_time('15:00', '15:00')) > 0 else morning_price
+            mid_return = (mid_day_price / morning_price) - 1
+            
+            # PM return (15:00 to close)
+            pm_return = (group['c'].iloc[-1] / mid_day_price) - 1
+            
+            prev_close = group['c'].iloc[-1]
     
     # Create returns DataFrame
     returns_df = pd.DataFrame({
