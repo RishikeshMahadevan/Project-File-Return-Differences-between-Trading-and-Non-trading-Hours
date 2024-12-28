@@ -19,72 +19,102 @@ def load_data():
     
     return aapl, amzn
 
+def prepare_trading_data(df):
+    """Prepare data for trading analysis"""
+    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    
+    # Create time column
+    df['time'] = df['timestamp'].dt.time
+    df['date'] = df['timestamp'].dt.date
+    
+    # Filter for regular trading hours (9:30 AM to 4:00 PM)
+    market_open = pd.to_datetime('09:30:00').time()
+    market_close = pd.to_datetime('16:00:00').time()
+    
+    trading_hours_df = df[
+        (df['time'] >= market_open) & 
+        (df['time'] <= market_close)
+    ].copy()
+    
+    return trading_hours_df
+
+def get_previous_trading_close(df, current_date):
+    """Find the previous trading day's closing price"""
+    current_date = pd.to_datetime(current_date)
+    
+    # Look back up to 5 days to find the previous trading day
+    for i in range(1, 5):
+        prev_date = current_date - pd.Timedelta(days=i)
+        prev_day_data = df[df['date'] == prev_date.date()]
+        
+        if not prev_day_data.empty:
+            return prev_day_data['c'].iloc[-1]  # Return the closing price
+    
+    return None
+
 def calculate_returns(df):
     """Calculate returns for different time periods"""
-    # Convert timestamp to datetime and set as index
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
-    df.set_index('timestamp', inplace=True)
+    df = prepare_trading_data(df)
+    returns_dict = {}
     
-    # Create daily groups
-    daily_groups = df.groupby(df.index.date)
+    # Sort dataframe by timestamp to ensure chronological order
+    df = df.sort_values('timestamp')
     
-    # Initialize lists to store returns
-    night_returns = []
-    am_returns = []
-    mid_returns = []
-    pm_returns = []
-    dates = []
-    
-    prev_close = None
-    
-    for date, group in daily_groups:
-        group = group.sort_index()
+    for date in sorted(df['date'].unique()):
+        day_data = df[df['date'] == date]
         
-        # Only process if we have data for the full trading day
-        if len(group) > 0:
-            # Night return (previous close to today's open)
+        # Night Return (Previous trading day close to 9:30 open)
+        try:
+            prev_close = get_previous_trading_close(df, date)
             if prev_close is not None:
-                night_return = (group['o'].iloc[0] / prev_close) - 1
-                
-                # AM return (9:30 AM to 10:30 AM)
-                morning_data = group[group.index.time <= pd.to_datetime('10:30').time()]
-                if len(morning_data) > 0:
-                    am_return = (morning_data['c'].iloc[-1] / group['o'].iloc[0]) - 1
-                else:
-                    am_return = 0
-                
-                # Mid return (10:30 AM to 3:00 PM)
-                mid_data = group[
-                    (group.index.time > pd.to_datetime('10:30').time()) &
-                    (group.index.time <= pd.to_datetime('15:00').time())
-                ]
-                if len(mid_data) > 0:
-                    mid_return = (mid_data['c'].iloc[-1] / morning_data['c'].iloc[-1]) - 1
-                else:
-                    mid_return = 0
-                
-                # PM return (3:00 PM to 4:00 PM)
-                pm_data = group[group.index.time > pd.to_datetime('15:00').time()]
-                if len(pm_data) > 0:
-                    pm_return = (pm_data['c'].iloc[-1] / mid_data['c'].iloc[-1]) - 1
-                else:
-                    pm_return = 0
-                
-                night_returns.append(night_return)
-                am_returns.append(am_return)
-                mid_returns.append(mid_return)
-                pm_returns.append(pm_return)
-                dates.append(date)
-            
-            prev_close = group['c'].iloc[-1]
+                today_open = day_data['o'].iloc[0]   # Today's open at 9:30 AM
+                night_return = (today_open - prev_close) / prev_close
+            else:
+                night_return = np.nan
+        except:
+            night_return = np.nan
     
-    # Create returns DataFrame
-    returns_df = pd.DataFrame({
-        'Night_Return': night_returns,
-        'AM_Return': am_returns,
-        'Mid_Return': mid_returns,
-        'PM_Return': pm_returns
-    }, index=dates)
+        # AM Return (9:30 to 10:30)
+        try:
+            open_price = day_data['o'].iloc[0]
+            am_cutoff = pd.to_datetime('10:30:00').time()
+            am_data = day_data[day_data['time'] <= am_cutoff]
+            if not am_data.empty:
+                am_close = am_data['c'].iloc[-1]
+                am_return = (am_close - open_price) / open_price
+            else:
+                am_return = np.nan
+        except:
+            am_return = np.nan
+            
+        # Mid Return (10:30 to 15:00)
+        try:
+            mid_start = pd.to_datetime('10:30:00').time()
+            mid_end = pd.to_datetime('15:00:00').time()
+            mid_start_price = day_data[day_data['time'] <= mid_start]['c'].iloc[-1]
+            mid_end_price = day_data[day_data['time'] <= mid_end]['c'].iloc[-1]
+            mid_return = (mid_end_price - mid_start_price) / mid_start_price
+        except:
+            mid_return = np.nan
+            
+        # PM Return (15:00 to 16:00)
+        try:
+            pm_start = pd.to_datetime('15:00:00').time()
+            pm_start_price = day_data[day_data['time'] <= pm_start]['c'].iloc[-1]
+            pm_close = day_data['c'].iloc[-1]
+            pm_return = (pm_close - pm_start_price) / pm_start_price
+        except:
+            pm_return = np.nan
+            
+        returns_dict[date] = {
+            'Night_Return': night_return,
+            'AM_Return': am_return,
+            'Mid_Return': mid_return,
+            'PM_Return': pm_return
+        }
+    
+    # Convert to DataFrame
+    returns_df = pd.DataFrame.from_dict(returns_dict, orient='index')
     
     return returns_df
 
