@@ -23,14 +23,6 @@ def calculate_returns(df):
     """Calculate returns for different time periods"""
     # Convert timestamp to datetime and set as index
     df['timestamp'] = pd.to_datetime(df['timestamp'])
-    
-    # Filter for trading hours (9:30 AM to 4:00 PM)
-    df['time'] = df['timestamp'].dt.time
-    df = df[
-        (df['time'] >= pd.to_datetime('09:30').time()) &
-        (df['time'] <= pd.to_datetime('16:00').time())
-    ]
-    
     df.set_index('timestamp', inplace=True)
     
     # Create daily groups
@@ -49,35 +41,40 @@ def calculate_returns(df):
         group = group.sort_index()
         
         # Only process if we have data for the full trading day
-        first_time = group.index[0].time()
-        last_time = group.index[-1].time()
-        
-        if first_time <= pd.to_datetime('09:31').time() and last_time >= pd.to_datetime('15:59').time():
+        if len(group) > 0:
             # Night return (previous close to today's open)
             if prev_close is not None:
                 night_return = (group['o'].iloc[0] / prev_close) - 1
                 
-                # AM return (9:30 to 10:30)
-                am_data = group.between_time('09:30', '10:30')
-                if len(am_data) > 0:
-                    am_return = (am_data['c'].iloc[-1] / group['o'].iloc[0]) - 1
-                    
-                    # Mid return (10:30 to 15:00)
-                    mid_data = group.between_time('10:30', '15:00')
-                    if len(mid_data) > 0:
-                        mid_return = (mid_data['c'].iloc[-1] / am_data['c'].iloc[-1]) - 1
-                        
-                        # PM return (15:00 to close)
-                        pm_data = group.between_time('15:00', '16:00')
-                        if len(pm_data) > 0:
-                            pm_return = (group['c'].iloc[-1] / mid_data['c'].iloc[-1]) - 1
-                            
-                            # Append all returns only if we have complete data
-                            night_returns.append(night_return)
-                            am_returns.append(am_return)
-                            mid_returns.append(mid_return)
-                            pm_returns.append(pm_return)
-                            dates.append(date)
+                # AM return (9:30 AM to 10:30 AM)
+                morning_data = group[group.index.time <= pd.to_datetime('10:30').time()]
+                if len(morning_data) > 0:
+                    am_return = (morning_data['c'].iloc[-1] / group['o'].iloc[0]) - 1
+                else:
+                    am_return = 0
+                
+                # Mid return (10:30 AM to 3:00 PM)
+                mid_data = group[
+                    (group.index.time > pd.to_datetime('10:30').time()) &
+                    (group.index.time <= pd.to_datetime('15:00').time())
+                ]
+                if len(mid_data) > 0:
+                    mid_return = (mid_data['c'].iloc[-1] / morning_data['c'].iloc[-1]) - 1
+                else:
+                    mid_return = 0
+                
+                # PM return (3:00 PM to 4:00 PM)
+                pm_data = group[group.index.time > pd.to_datetime('15:00').time()]
+                if len(pm_data) > 0:
+                    pm_return = (pm_data['c'].iloc[-1] / mid_data['c'].iloc[-1]) - 1
+                else:
+                    pm_return = 0
+                
+                night_returns.append(night_return)
+                am_returns.append(am_return)
+                mid_returns.append(mid_return)
+                pm_returns.append(pm_return)
+                dates.append(date)
             
             prev_close = group['c'].iloc[-1]
     
@@ -93,7 +90,7 @@ def calculate_returns(df):
 
 def calculate_period_strategy_returns(aapl_returns, amzn_returns, aapl_weight=0.5, amzn_weight=0.5, initial_capital=100000):
     """
-    Calculate strategy returns using vectorized operations with custom weights
+    Calculate strategy returns using the same methodology as the notebook
     """
     capital_aapl = initial_capital * aapl_weight
     capital_amzn = initial_capital * amzn_weight
@@ -104,12 +101,15 @@ def calculate_period_strategy_returns(aapl_returns, amzn_returns, aapl_weight=0.
     
     # Vectorized calculations for each period
     for period in periods:
+        # Calculate position values using cumulative returns
         portfolio[f'AAPL_{period}_Position'] = capital_aapl * (1 + aapl_returns[period]).cumprod()
         portfolio[f'AMZN_{period}_Position'] = capital_amzn * (1 + amzn_returns[period]).cumprod()
+        
+        # Total portfolio value for this period
         portfolio[f'{period}_Value'] = portfolio[f'AAPL_{period}_Position'] + portfolio[f'AMZN_{period}_Position']
         portfolio[f'{period}_Return'] = portfolio[f'{period}_Value'].pct_change()
     
-    # Buy & Hold strategy
+    # Buy & Hold strategy (using cumulative returns of daily total returns)
     aapl_daily_return = (1 + aapl_returns).prod(axis=1) - 1
     amzn_daily_return = (1 + amzn_returns).prod(axis=1) - 1
     
@@ -122,7 +122,7 @@ def calculate_period_strategy_returns(aapl_returns, amzn_returns, aapl_weight=0.
 
 def calculate_metrics(portfolio):
     """
-    Calculate performance metrics
+    Calculate performance metrics using the same methodology as the notebook
     """
     strategies = ['Night_Return', 'AM_Return', 'Mid_Return', 'PM_Return', 'Buy_Hold']
     
@@ -130,31 +130,45 @@ def calculate_metrics(portfolio):
                                 'Max_Drawdown(%)', 'Win_Rate(%)', 'Profit_Factor', 
                                 'Number_of_Trades', 'Daily_Std(%)'])
     
-    rf_daily = 0.02/252
+    rf_daily = 0.02/252  # Annual risk-free rate to daily
     
     for strategy in strategies:
         returns = portfolio[f'{strategy}_Return'].dropna()
         values = portfolio[f'{strategy}_Value'].dropna()
         
+        # Total return
         total_return = (values.iloc[-1] / values.iloc[0] - 1) * 100
+        
+        # Annualized return
+        ann_return = ((1 + returns.mean()) ** 252 - 1) * 100
+        
+        # Sharpe ratio
         excess_returns = returns - rf_daily
         sharpe = np.sqrt(252) * (excess_returns.mean() / excess_returns.std())
+        
+        # Maximum drawdown
         drawdown = (values / values.expanding().max() - 1).min() * 100
+        
+        # Win rate
         win_rate = (returns > 0).mean() * 100
         
+        # Profit factor
         positive_returns = returns[returns > 0].sum()
         negative_returns = abs(returns[returns < 0].sum())
         profit_factor = positive_returns / negative_returns if negative_returns != 0 else np.inf
         
+        # Daily standard deviation
+        daily_std = returns.std() * 100
+        
         metrics[strategy] = [
             total_return,
-            ((1 + returns.mean()) ** 252 - 1) * 100,
+            ann_return,
             sharpe,
             drawdown,
             win_rate,
             profit_factor,
             len(returns),
-            returns.std() * 100
+            daily_std
         ]
     
     return metrics.round(2)
