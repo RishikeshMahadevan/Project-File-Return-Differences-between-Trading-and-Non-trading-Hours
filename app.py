@@ -60,11 +60,11 @@ def calculate_returns(df):
                 dates.append(date)
             
             # AM return (open to 10:30)
-            morning_price = group.between_time('9:30', '10:30')['c'].iloc[0] if len(group.between_time('10:30', '10:30')) > 0 else group['o'].iloc[0]
+            morning_price = group.between_time('10:30', '10:30')['c'].iloc[0] if len(group.between_time('10:30', '10:30')) > 0 else group['o'].iloc[0]
             am_return = (morning_price / group['o'].iloc[0]) - 1
             
             # Mid return (10:30 to 15:00)
-            mid_day_price = group.between_time('15:00', '16:00')['c'].iloc[0] if len(group.between_time('15:00', '15:00')) > 0 else morning_price
+            mid_day_price = group.between_time('15:00', '15:00')['c'].iloc[0] if len(group.between_time('15:00', '15:00')) > 0 else morning_price
             mid_return = (mid_day_price / morning_price) - 1
             
             # PM return (15:00 to close)
