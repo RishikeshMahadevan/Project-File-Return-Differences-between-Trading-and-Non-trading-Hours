@@ -49,26 +49,35 @@ def calculate_returns(df):
         group = group.sort_index()
         
         # Only process if we have data for the full trading day
-        if len(group) > 0:
+        first_time = group.index[0].time()
+        last_time = group.index[-1].time()
+        
+        if first_time <= pd.to_datetime('09:31').time() and last_time >= pd.to_datetime('15:59').time():
             # Night return (previous close to today's open)
             if prev_close is not None:
                 night_return = (group['o'].iloc[0] / prev_close) - 1
-                night_returns.append(night_return)
-                am_returns.append(am_return)
-                mid_returns.append(mid_return)
-                pm_returns.append(pm_return)
-                dates.append(date)
-            
-            # AM return (open to 10:30)
-            morning_price = group.between_time('10:30', '10:30')['c'].iloc[0] if len(group.between_time('10:30', '10:30')) > 0 else group['o'].iloc[0]
-            am_return = (morning_price / group['o'].iloc[0]) - 1
-            
-            # Mid return (10:30 to 15:00)
-            mid_day_price = group.between_time('15:00', '15:00')['c'].iloc[0] if len(group.between_time('15:00', '15:00')) > 0 else morning_price
-            mid_return = (mid_day_price / morning_price) - 1
-            
-            # PM return (15:00 to close)
-            pm_return = (group['c'].iloc[-1] / mid_day_price) - 1
+                
+                # AM return (9:30 to 10:30)
+                am_data = group.between_time('09:30', '10:30')
+                if len(am_data) > 0:
+                    am_return = (am_data['c'].iloc[-1] / group['o'].iloc[0]) - 1
+                    
+                    # Mid return (10:30 to 15:00)
+                    mid_data = group.between_time('10:30', '15:00')
+                    if len(mid_data) > 0:
+                        mid_return = (mid_data['c'].iloc[-1] / am_data['c'].iloc[-1]) - 1
+                        
+                        # PM return (15:00 to close)
+                        pm_data = group.between_time('15:00', '16:00')
+                        if len(pm_data) > 0:
+                            pm_return = (group['c'].iloc[-1] / mid_data['c'].iloc[-1]) - 1
+                            
+                            # Append all returns only if we have complete data
+                            night_returns.append(night_return)
+                            am_returns.append(am_return)
+                            mid_returns.append(mid_return)
+                            pm_returns.append(pm_return)
+                            dates.append(date)
             
             prev_close = group['c'].iloc[-1]
     
