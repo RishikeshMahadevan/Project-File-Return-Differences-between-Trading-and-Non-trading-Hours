@@ -150,7 +150,7 @@ def calculate_period_strategy_returns(aapl_returns, amzn_returns, aapl_weight=0.
     
     return portfolio
 
-def calculate_metrics(portfolio):
+def calculate_metrics(portfolio, rf_rate=2.0):
     """
     Calculate performance metrics using the same methodology as the notebook
     """
@@ -160,7 +160,7 @@ def calculate_metrics(portfolio):
                                 'Max_Drawdown(%)', 'Win_Rate(%)', 'Profit_Factor', 
                                 'Number_of_Trades', 'Daily_Std(%)'])
     
-    rf_daily = 0.02/252  # Annual risk-free rate to daily
+    rf_daily = rf_rate/100/252  # Convert annual percentage to daily rate
     
     for strategy in strategies:
         returns = portfolio[f'{strategy}_Return'].dropna()
@@ -222,6 +222,17 @@ aapl_weight = st.sidebar.slider("AAPL Weight", 0.0, 1.0, 0.5, 0.1)
 amzn_weight = 1 - aapl_weight
 st.sidebar.write(f"AMZN Weight: {amzn_weight:.1f}")
 
+# In the sidebar inputs section, add this after the portfolio weights
+st.sidebar.subheader("Risk Parameters")
+rf_rate = st.sidebar.number_input(
+    "Risk-free Rate (%)", 
+    min_value=0.0, 
+    max_value=20.0, 
+    value=2.0, 
+    step=0.1,
+    help="Annual risk-free rate used for Sharpe ratio calculation"
+)
+
 # Main content
 st.title("Trading Hours Analysis")
 
@@ -242,7 +253,7 @@ if st.sidebar.button("Analyze"):
     
     # Calculate portfolio returns and metrics
     st.session_state.portfolio = calculate_period_strategy_returns(aapl_returns, amzn_returns, aapl_weight, amzn_weight)
-    st.session_state.metrics = calculate_metrics(st.session_state.portfolio)
+    st.session_state.metrics = calculate_metrics(st.session_state.portfolio, rf_rate)
 
 if st.session_state.portfolio is not None:
     # Create PnL plot
